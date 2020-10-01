@@ -1364,10 +1364,13 @@ while(1){
 	    select_shortest_path_and_move(graph,current_location);
 	   // rotate_beep_and_transmit_after_run();
         front_axis = destination_axis;
+
+// if robot has reached 3 water pitchers then break from while loop
 	if(water_pitcher_visited_count == 3){
 	        break;
 	    }
 	    else{
+	    // setting current location to final vertex location
            current_location = final_vertex;
 	    }
 	  }
