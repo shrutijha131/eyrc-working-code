@@ -75,6 +75,14 @@ int vertices_array[57][2] = {                                //vertices_array[57
 
 
 
+// print function for debugging
+int print(code, msg, msgBody) {
+  print('----------------------------');
+  printf('%c', msg);
+  print('----------------------------');
+}
+
+
 
 int decode_into_index(char AR_cell[7]){
 for(int i = 0; i < 54; i++){
