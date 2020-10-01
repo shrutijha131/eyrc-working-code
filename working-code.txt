@@ -155,9 +155,9 @@ int minDistance(int dist[],int sptSet[])
 	for (int v = 0; v < V; v++)
 	if ((sptSet[v] == 0) && (dist[v] <= min))
 	{min = dist[v], min_index = v;}
-
 	return min_index;
 } 
+
 /*
  * Function Name: printPath
  * Input:	  parent[] -> This array stores the parent of the element(according to index), ie. the index represent the vertex and the value at that index represent its parent.
@@ -1166,6 +1166,18 @@ int rotate_beep_and_transmit_after_run()
 
 	return 0;
 }*/
+
+
+// ar controller
+
+int ar_controller(y){
+int x = 10;
+for(int i = 0; i< =x; i++){
+y ++;
+}
+return y;
+}
+
 
  /*
  * Function Name: take_input_from_python_script()
