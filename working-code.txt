@@ -1,0 +1,1354 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <string.h>
+#define V 54                                    // V:Total Number of vertex in Adjancy Matrix ( 54 * 54 )
+int vinit  =1;
+static int vertex_path_array[V];                 //vertex_path_array[V] : This array stores sequence of vertices that is decoded later on.
+char LR_path[V];                                 //LR_path[V] : This array contains sequence of 'L','R' that is used to move the robot
+int vertex_path_array_counter;                  //vertex_path_array_counter:acts as a counter for vertex_path_array[]
+int final_vertex;                               //final_vertex: It stores final 'vertex number' where it has to go
+int pitcher_vertex_1,pitcher_vertex_2,pebble_1_vertex_1,pebble_1_vertex_2,pebble_2_vertex_1,pebble_2_vertex_2,pebble_3_vertex_1,pebble_3_vertex_2;                                      //v1 : vertex 1 ,v2 : vertex 2 (two vertices of open sides of AR_object)
+int current_location;                           //current_location: stores the current location of the bot
+int front_axis = 1;            // destination_axis: This is the axis in which the AR_object is placed (the two sides/vertices in which it is open)(eg."16-1-1" the axis is "1-1")
+int destination_axis;                                                //front_axis: The axis in which the bot is cuurently looking at(its nose is pointing at)(eg,"1"/"2"/"3")
+int water_pitcher_visited_count = 0;            //water_pitcher_visited_count :counts how may times water pitcher has been visited
+int update_destination_counter = 0;             //update_destination_counter :updates the odd even value so that a alternate sequence is obtained for going to pebble and pitcher alternately
+int  first_time_src_var = 1;                    //first_time_src_var: It is used to add initial vertex to vertex_array_path[] array.
+char destination_name;                          // Stores the destination name ;either 'W'=water pitcher , 'P' = pebble
+volatile unsigned char data;                    // stores the data during transmission through zigbee
+char robot_start[8] =  {'S','T','A','R','T','-','1'};
+char pebble_cell1[7] = {"16"};
+char pebble_axis1[4] =  {"1-1"};
+char pebble_cell2[7] = {"8"};
+char pebble_axis2[4] =  {"2-2"};
+char pebble_cell3[7] = {"1"};
+char pebble_axis3[4] =  {"1-1"};
+char pitcher_cell[7] = {"2"};
+char pitcher_axis[4] = {"3-3"};
+int distances[8];
+	
+char decode_base_array[57][7] = {                            // decode_base_array[57][7] : It stores string patterns made of concatenated pebble/pitcher cell and pebble/pitcher axis, It is used to find concatenated string eg,"16-1-1" and return the index eg,18 here.
+	                             "5-1-1","5-2-2","5-3-3",
+	                             "10-1-1","10-2-2","10-3-3",
+	 "15-1-1","15-2-2","15-3-3",
+                                 "2-1-1","2-2-2","2-3-3",
+                                 "6-1-1","6-2-2","6-3-3",
+	 "11-1-1","11-2-2","11-3-3",
+	 "16-1-1","16-2-2","16-3-3",
+	 "1-1-1","1-2-2","1-3-3",
+                                 "3-1-1","3-2-2","3-3-3",
+	 "7-1-1","7-2-2","7-3-3",
+                                 "12-1-1","12-2-2","12-3-3",
+                                 "17-1-1","17-2-2","17-3-3",
+                                 "4-1-1","4-2-2","4-3-3",
+                                 "8-1-1","8-2-2","8-3-3",
+                                 "13-1-1","13-2-2","13-3-3",
+	 "18-1-1","18-2-2","18-3-3",
+	 "9-1-1","9-2-2","9-3-3",
+	 "14-1-1","14-2-2","14-3-3",
+	 "19-1-1","19-2-2","19-3-3"
+	 };
+
+int vertices_array[57][2] = {                                //vertices_array[57][2] : It stores the two vertices according to index returned on searching decode_base_array[57][7] for a string like "16-1-1", These are the two vertices open (AR_object) according to a cell number and pebble/pitcher axis.
+                             {0,12},{3,8},{4,7},             // This representation is also referred as 'vertex number'
+                             {1,13},{4,9},{5,8},
+                             {2,14},{5,10},{6,9},
+                             {7,22},{11,17},{12,16},
+                             {8,23},{12,18},{13,17},
+                             {9,24},{13,19},{14,18},
+                             {10,25},{14,20},{15,19},
+                             {16,33},{21,28},{22,27},
+                             {17,34},{22,29},{23,28},
+                             {18,35},{23,30},{24,29},
+                             {19,36},{12,31},{25,30},
+                             {20,37},{25,32},{26,31},
+                             {28,43},{33,39},{34,38},
+                             {29,44},{34,40},{35,39},
+                             {30,45},{35,41},{36,40},
+                             {31,46},{36,42},{37,41},
+                             {39,51},{43,48},{44,47},
+                             {40,52},{44,49},{45,48},
+                             {41,53},{45,50},{46,49}
+                             };
+
+
+
+
+int decode_into_index(char AR_cell[7]){
+for(int i = 0; i < 54; i++){
+    if(strcmp(decode_base_array[i],AR_cell) == 0){
+        return i;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Function Name: assign_two_vertices
+ * Input:	  decode_index -> It is the index of the concatenated string returned by "decode_into_index(char AR_cell[7])" function and
+ *                is used to assign vertex 1 and vertex 2 (the two open sides of the AR_object ie. two vertex)
+ * Output:	  int to inform the caller that the program exited correctly. It initializes v1 and v2 with integer values.
+ * Logic:         This function searches the 'decode_index' according to index of array ('vertices_array[57][2]') and assigns vertices_array[decode_index][0]
+ *                to v1 and vertices_array[decode_index][1] to v2. In 'select_shortest_path_and_move' these vertices v1 and v2 are used to calculate shortest distance
+ *                from current location to each of the vertex and then calculate the vertex which is closest to robots current location.
+ * Example Call: decode_into_index(pebble_cell)
+*/
+
+int assign_two_vertices(int decode_index,int decode_index_identifier){
+	   if(decode_index_identifier == 0){
+        pitcher_vertex_1 = vertices_array[decode_index][0];
+        pitcher_vertex_2 = vertices_array[decode_index][1];
+	   }
+	   else if(decode_index_identifier == 1){
+	   pebble_1_vertex_1 = vertices_array[decode_index][0];
+	   pebble_1_vertex_2 = vertices_array[decode_index][1];
+	   }
+	   else if(decode_index_identifier == 2){
+	   pebble_2_vertex_1 = vertices_array[decode_index][0];
+	   pebble_2_vertex_2 = vertices_array[decode_index][1];
+	   }
+	   else if(decode_index_identifier == 3){
+	   pebble_3_vertex_1 = vertices_array[decode_index][0];
+	   pebble_3_vertex_2 = vertices_array[decode_index][1];
+	   }
+	   else{
+	   // Error
+	   }
+        return 0;
+}
+
+/*
+ * Function Name: initialize_start_locations
+ * Input:	  None
+ * Output:	  int to inform the caller that the program exited correctly. It only sets current location to 'vertex number' :  1 or 52.
+ * Logic:         This function first checks whether 'robot_start' is equal to "START-1"/"START-2" and then the value of current_location is updated
+ *                to 'vertex number' :  1 or 52.
+ * Example Call: initialize_start_locations()
+*/
+
+int initialize_start_locations()
+{
+	if(strcmp(robot_start , "START-1") == 0){
+      current_location = 1;
+   }
+   else{
+    current_location = 52;
+   }
+ return 0;
+}
+
+/*
+ * Function Name: minDistance
+ * Input:	  dist[] -> This array stores the distance of a node(vertex) from source vertex. Eg , 'i' represent vertex then dist[i] represent distance of node from source/current vertex.
+ *                sptSet[] -> This array contains shortest path set for nodes from current vertex.
+ *	  Output: min_index -> It returns minimum index by calculating when distance of the particular node <= INT_MAX
+ * Logic:         It first assigns min as a sentinel by assigning a maximum value INT_MAX . After that a loop is used to traverse all vertices and checks that distance of node is less than equal to min
+ *                and sptSet[] for that index/vertex is 0 then min is assigned distance from the current location and min_index is assigned the index at that moment.
+ * Example Call:  minDistance(dist, sptSet)
+*/
+
+int minDistance(int dist[],int sptSet[])
+{
+	int min = INT_MAX, min_index;
+	for (int v = 0; v < V; v++)
+	if ((sptSet[v] == 0) && (dist[v] <= min))
+	{min = dist[v], min_index = v;}
+
+	return min_index;
+} 
+/*
+ * Function Name: printPath
+ * Input:	  parent[] -> This array stores the parent of the element(according to index), ie. the index represent the vertex and the value at that index represent its parent.
+ *                case_flag -> This variable helps the function to identify when it has to return the distance from one vertex to other and when to create
+ *                j -> It contains the value of index (of all 54 vertices) ,one by one at a time.
+ * Output:	  int to inform the caller that the program exited correctly . It calls 'printPath' recursively and creates 'vertex_path_array[vertex_path_array_counter]'.
+ * Logic:         First it checks that distance from parent node to itself and returns. Then it calls printPath function recursively. After that it checks that case_flag to be 2,
+ *                then it uses a variable ' first_time_src_var ' and checks to be 1 , if 1 then it fills the 'vertex_path_array[]' with the source or starting index
+ *                After that vertex_path_array[] is filled with the values of j that is extracted using parent array.
+ * Example Call:  printPath(parent, i, case_flag)
+*/
+
+void printPath(int parent[], int j, int case_flag)
+{
+ 	if(parent[j] == - 1)
+	return;
+
+	printPath(parent, parent[j], case_flag);
+
+    if(case_flag == 2)
+    {
+    if(first_time_src_var == 1){
+            vertex_path_array_counter++;
+            vertex_path_array[vertex_path_array_counter] = current_location;
+            first_time_src_var++;
+    }
+     vertex_path_array_counter++;
+     vertex_path_array[vertex_path_array_counter] = j;
+    }
+}
+
+/*
+ * Function Name: printSolution
+ * Input:	  dist[] -> This array stores the distance of a node(vertex) from source vertex.
+ *                n -> It is the total number of vertices in graph/map/arena ie.54
+ *                parent[] -> This array stores the parent of the element(according to index), ie. the index represent the vertex and the value at that index represent its parent.
+ *                finalNode -> It is the final vertex whether the robot has to go.
+ *                case_flag -> This variable helps the function to identify when it has to return the distance from one vertex to other and when to create
+ *	  the 'vertex_path_array[]'. If case_flag = 1 then it returns the distance from src to finalNode ; when case_flag = 2 then
+ *	  it creates a vertex_path_array[] that contain sequence of vertices ('vertex numbers')from current location to final location.
+ * Output:	  It returns the distance from current location to final location.
+ *                dist[i] -> This variable contains the distance of every vertex from source vertex , ie. if index 'i' represent the vertex then dist[i] represent its distance from source vertex.
+ * Logic:         This function traverses through every vertex and finds the finalNode and checks case_flag == 1 ie. distance has to be returned from function then dist[i] is returned.
+ *                After this 'printPath(parent, i, case_flag)' is called repeatedly with each index values for creating the 'vertex_path_array[]' that stores sequence of vertices from source to
+ *                finalNode.
+ * Example Call:  printSolution(dist, V, parent,finalNode,case_flag)
+*/
+
+int printSolution(int dist[], int n,int parent[],int finalNode, int case_flag)
+{
+  	for (int i = 0; i < V; i++)
+	{
+	    if(i == finalNode)
+	    {
+	     if(case_flag == 1){
+	        return dist[i];
+	     }
+   	    printPath(parent, i, case_flag);
+	    }
+	}
+    return 0;
+}
+
+
+/*
+ * Function Name: dijkstra
+ * Input:	  graph[V][V] -> It is the 54*54 adjancy matrix (graph representation) that stores nodes and how they are connected with each other.
+ *                src -> This variable stores the current location of the robot.
+ *                finalNode -> This variable stores the final vertex or the location where the robot has to go.
+ *                case_flag -> This variable helps the function to identify when it has to return the distance from one vertex to other and when to create
+ *	the 'vertex_path_array[]'. If case_flag = 1 then Dijsktra returns the distance from src to finalNode ; when case_flag = 2 then
+ *	Dijkstra function creates a vertex_path_array[] that contain sequence of vertices ('vertex numbers')from current location to final location.
+ * Output:	  It returns the distance from current location to final location.
+ *                distance_from_current_to_final -> This variable stores the distance from current location(src) to final location(finalNode) , which is further used to calculate
+ *                the closest vertex to current location(in 'select_shortest_path_and_move()').
+ * Logic:         It first declares set of variables and then runs a for loop ie. traverses through all the vertices and assign parent of all the nodes as -1
+ *                It also assigns distance of all nodes from src node as INT_MAX (maximum value), and also assigns Shortest path set (sptSet[i]) for all the indexes(vertices)
+ *                as 0. After that it assigns distance of src from itself as 0. After that it traverses from 0 to 52 vertex and for each index  'minDistance(dist, sptSet)'
+ *                is called and stored in 'u' variable and also assigns sptSet[u] = 1. After that a nested for loop is run from 0 to 53 and it checks
+ *                that (sptSet[v] && graph[u][v] && dist[u] + graph[u][v] < dist[v]) is false or not , if it is false then dist[current index] is made equal to u (previous). After that
+ *                dist[v] is made equal to addition of dist[u] and graph[u][v] . After that 'printSolution' function is called further calls different functions to calculate distance or
+ *                create vertex_path_array[].
+ * Example Call:  dijkstra(graph,current_location,v1,1) (The last argument(case_flag) can be 1 or 2 based on we want distance from 'dijkstra' function or we want to generate LR_path)
+*/
+
+int dijkstra(int graph[V][V], int src, int finalNode, int case_flag)
+{
+    vertex_path_array_counter = -1;
+    first_time_src_var = 1;
+	int distance_from_current_to_final;
+	int dist[V];
+	int sptSet[V];
+	int parent[V];
+
+	for (int i = 0; i < V; i++)
+	{
+	parent[src] = -1;
+	dist[i] = INT_MAX;
+	sptSet[i] = 0;
+	}
+ 	dist[src] = 0;
+
+ 	for (int count = 0; count < V - 1; count++)
+	{
+	 	int u = minDistance(dist, sptSet);
+     	sptSet[u] = 1;
+
+ 	for (int v = 0; v < V; v++)
+	{	if (!sptSet[v] && graph[u][v] && dist[u] + graph[u][v] < dist[v])
+	{
+	parent[v] = u;
+	dist[v] = dist[u] + graph[u][v];
+	}
+	}
+
+	}
+	distance_from_current_to_final = printSolution(dist, V, parent,finalNode,case_flag);
+    return distance_from_current_to_final;
+}
+
+/*
+ * Function Name: move_after_LR_path_formed
+ * Input:	  None
+ * Output:	  int to inform the caller that the program exited correctly. It runs a while loop and traverse through 'LR_path[]' array and
+ *                moves according to left or right command given.
+ * Logic:         This function is called after LR path is formed for a run. This functions first runs an infinite while loop then takes the values of ADC_Conversion(3),ADC_Conversion(2),ADC_Conversion(1) and
+ *                then run a nested while loop then again takes the values of ADC_Conversion(3),ADC_Conversion(2),ADC_Conversion(1) as input because
+ *                the values of White line sensors has to be updated. Then call "follow()" function repeatdly to move the bot in forward direction till
+ *                this (Black Black Black): Right_white_line>0x20 && Center_white_line>0x20 && Left_white_line>0x20 is achieved , that is the robot has reached
+ *                a node, after that the inner while loop is exited (because as node is found , there is no need of moving forward) and then the function fetches
+ *                the value present at index i = 0 from the LR_array[] , then checks whether 'L' or 'R' and moves left or right according to that. Further the value of i is incremented
+ *                so as to traverse in the LR_array[] . If '\0' is received that means that the whole 'LR_path[]' is traversed and now function can exit.
+ * Example Call:  move_after_LR_path_formed()
+*/
+
+int move_after_LR_path_formed()
+{
+ int i =0;
+ while(LR_path[i] != '\0'){printf("%c ",LR_path[i]);i++;}
+ printf("\n");
+ 	return 0;
+}
+
+/*
+ * Function Name: check_edge_case
+ * Input:	  x_diff -> difference between two consecutive x-coordinates
+ *                y_diff -> difference between two consecutive y-coordinates, these difference coordinates and front_axis
+ *                are used to identify in which direction to move ('L' or 'R')
+ * Output:	  int to inform the caller that the program exited correctly. It does 3 functions ie. check signs of x_diff and y_diff and front axis and rotate accordingly.
+ *                After that it stops and move backwards for obtaining (Black Black Black) white line sensor condition because the bot leaves the BBB condition when it rotates.
+ *                After that it updates the front axis according to x and y coordinate difference and current front axis.
+ * Logic:         This functions check the case when the robot is on a front_axis, on which the difference of coordinates (x2-x1 , y2-y1) (from current vertex to next vertex)
+ *	  are not defined in general traversal cases, ie. when the robot has to turn and move in 180 degrees angle direction.
+ *	(x1 = x coordinate of current vertex)
+ *	(x2 = x coordinate of final vertex)
+ *	(y1 = y coordinate of current vertex)
+ * 	(y2 = y coordinate of final vertex)
+ *               When the robot is pointing towards a particular axis on which the movement defined by difference of axis and current front axis is not defined then a series
+ *               of if else statements that check that whether if its that case then it will first rotate 120 degrees right and then stop and move backwards
+ *               so that ( Black Black Black ) white line sensor condition is achieved , because the BBB condition is not present  after 120 degrees rotation.
+ *               After that the front axis is updated according to the following rules :
+ *
+ *               x_diff	y_diff	front_axis(old)	front_axis(new)
+ *               positive   positive	3	        2
+ *               positive   constant    1                   3
+ *               positive   negative    2                   1
+ *               negative	negative	3	2
+ *               negative   constant    1                   3
+ *               negative   positive    2                   1
+ *
+ * Example Call:  check_edge_case(x_coordinate_difference , y_coordinate_difference)
+*/
+
+int check_edge_case(int x_diff , int y_diff)
+{
+	     if((x_diff > 0 && y_diff > 0) && (front_axis == 3))       // x positive, y positive
+	     {
+	     //right_degrees(rotation_value);                                // Rotate by 120 degrees right
+	     //stop();                                                  // Stop the robot
+	     //back_mm(back_value);                                     // Move backwards by 'back_value'( = 500 ) for obtaining BBB condition on white line sensors and continue path traversal
+	     front_axis = 2;                                          // Update the value of front axis according to rotation
+	     }
+
+	     if((x_diff > 0 && y_diff == 0) && (front_axis == 1))       // x positive, y constant
+	     {
+	     //right_degrees(rotation_value);                                 // rotate by 120 degrees right
+	     //stop();
+	     //b/ack_mm(back_value);
+	     front_axis = 3;
+	     }
+
+	     if((x_diff > 0 && y_diff < 0) && (front_axis == 2)){      // x positive, y negative
+	     //rotate 120 R
+	     //right_degrees(rotation_value);                              // rotate by 120 degrees right
+	     //s/top();
+	     //back_mm(back_value);
+	     front_axis = 1;
+     }
+     // x - ,y -
+     if((x_diff < 0 && y_diff < 0) && (front_axis == 3)){
+	     // rotate by 120 R
+	     //right_degrees(rotation_value);                                     // rotate by 120 degrees right
+	     //stop();
+	     //back_mm(back_value);
+	     front_axis = 2;
+     }
+     // x- , y = k
+     if((x_diff < 0 && y_diff == 0) && (front_axis == 1)){
+	     // rotate by 120 R
+	    // right_degrees(rotation_value);                                // rotate by 120 degrees right
+	    // stop();
+	    // back_mm(back_value);
+	     front_axis = 3;
+     }
+
+     //x - ,y +
+     if((x_diff < 0 && y_diff > 0) && (front_axis == 2)){
+	    // right_degrees(rotation_value);                                    // rotate by 120 degrees right
+	    // stop();
+	    // back_mm(back_value);
+	     front_axis = 1;
+	 }
+	return 0;
+}
+
+/*
+ * Function Name: update_axis
+ * Input:	  LR_path_counter -> It is the counter for 'LR_path[]' array that at the time of call points to a index of 'LR_path[]'
+ * Output:	  int to inform the caller that the program exited correctly. Does one function ie. updates the front axis according to current front axis and the rotation command provided.
+ * Logic:         This function first checks the value of front axis and the movement command provided ('L'/'R')and updates the value of front axis according to following rules :
+ *
+ *	front_axis (OLD)  movement_command ('L'/'R')  front_axis (NEW)
+ *	2	   L	   1
+ *	2                 R                           3
+ *	1                 L                           3
+ *	1                 R                           2
+ *	3                 L                           2
+ *	3                 R                           1
+ *
+ * Example Call: update_axis(LR_path_counter)
+*/
+int update_axis(int LR_path_counter)
+{
+
+	if(front_axis == 2 && LR_path[LR_path_counter] == 'L'){
+	front_axis = 1;
+	}
+	else if(front_axis == 2 && LR_path[LR_path_counter] == 'R'){
+	front_axis = 3;
+	}
+	else if(front_axis == 1 && LR_path[LR_path_counter] == 'L'){
+	front_axis = 3;
+	}
+	else if(front_axis == 1 && LR_path[LR_path_counter] == 'R'){
+	front_axis = 2;
+	}
+	else if(front_axis == 3 && LR_path[LR_path_counter] == 'L'){
+	front_axis = 2;
+	}
+	else if(front_axis == 3 && LR_path[LR_path_counter] == 'R'){
+	front_axis = 1;
+	}
+	else{
+	// printf(" Error: Cannot update axis ! ");
+	}
+	return 0;
+}
+
+/*
+ * Function Name: create_LR_path
+ * Input:	  graph[V][V] -> It is the 54*54 adjancy matrix (graph representation) that stores nodes and how they are connected with each other.
+ *                initial_vertex -> It is the current / initial location (vertex number) of the robot , it is later used by 'dijsktra' to calculate path and distance to final vertex.
+ *                final_vertex -> It is the final location (vertex number) of the robot , it is later used by 'dijsktra' to calculate path and distance from initial vertex.
+ * Output:	  int to inform the caller that the program exited correctly. Does five functions : Calls 'dijkstra' with case_flag = 2 (the last parameter) that creates index_path_array[] that
+ *                stores sequence of vertex numbers (the number assigned to each node in the arena/map/graph). After that (x1,x2) and (y1,y2) are calculated and
+ *                'check_edge_case(x_coordinate_difference, y_coordinate_difference)' is called to check edge (backward 180 motion case) and then 'L'/'R' path is stored ,axis is updated
+ *                and 'move_after_LR_path_formed()' is called to move the robot according to LR path formed.
+ * Logic:         This function first initializes few variables and then calls 'dijkstra(graph,initial_vertex,final_vertex,2)' with last parameter as '2' (case_flag) which is used by dijkstra to
+ *                identify that it has to create a vertex_path_array[V] according to initial and final vertex provided to it. After that 'vertex_path_array[V]' is traversed in consecutive pair
+ *                and according to vertex number(that is stored in vertex_path_array[V]) the two consecutive vertex numbers in the array are provided with coordinates (x1,y1) and (x2,y2) on
+ *                the basis of the following rule :
+ *                vertex number   x-coordinate  y-coordinate
+                  0               0              2
+                  1               0              0
+                  2               0             -2
+	  3               1              3
+	  4               1              1
+	  5               1             -1
+	  6               1	-3
+	  7               2              3
+	  8               2              1
+	  9               2             -1
+	  10              2             -3
+	  11              3              4
+	  12              3              2
+	  13              3              0
+	  14              3             -2
+	  15              3             -4
+	  16              4              4
+	  17              4              2
+	  18              4              0
+	  19              4             -2
+	  20              4             -4
+	  21              5              5
+	  22              5              3
+	  23              5              1
+	  24              5             -1
+	  25              5             -3
+	  26              5             -5
+	  27              6              5
+	  28              6              3
+	  29              6              1
+	  30              6             -1
+	  31              6             -3
+	  32              6             -5
+	  33              7              4
+	  34              7              2
+	  35              7              0
+	  36              7             -2
+	  37              7             -4
+	  38              8              4
+	  39              8              2
+	  40              8              0
+	  41              8             -2
+	  42              8             -4
+	  43              9              3
+	  44              9              1
+	  45              9             -1
+	  46              9             -3
+	  47              10             3
+	  48              10             1
+	  49              10            -1
+	  50              10            -3
+	  51              11             2
+	  52              11             0
+	  53	  11            -2
+ * After assigning the x1,y1 and x2,y2 to consecutive coordinates their difference is calculated and stored in x_coordinate_difference and y_coordinate_difference. On the basis of this difference
+ * of x and y coordinate the bot decide whether to move left or right. It calculates the difference between the coordinates and then according to following rules
+ * fills the 'LR_path[]' array with 'L' or 'R' :
+ *
+ *x_coordinate_difference  y_coordinate_difference    front_axis  Movement (or assign values to 'LR_path[]' array)
+ *
+ *  	positive	positive	1           Left
+ *      positive	positive        2	Right
+ *      positive	constant        3           Right
+ *      positive	constant        2           Left
+ *      positive	negative        3           Left
+ *      positive	negative	1	Right
+ *      negative	negative        2           Right                               {  fa : the axis in which robot's nose is pointing / or in which direction("1-1"/"2-2"/"3-3")
+ *      negative	negative	1	Left	                       Left : 'L'
+ *      negative	constant        2           Left                                   Right : 'R'
+ *      negative	constant        3           Right                               }
+ *      negative	        positive        3           Left
+ *      negative	positive        1           Right
+ *
+ * After this 'check_edge_case' is called that checks initially whether the robot can move or not in the direction provided to it , if not it rotates the bot
+ * 120 degrees right so that it can follow 'L' or 'R' command given to it. After that using above rules 'LR_path' array is formed ,and after each LR assigning 'update_axis(LR_path_counter)'
+ * is called that updates the front axis of the robot because after each left or right the robot has changed its orientation from "1-1" to "2-2" and such. After the whole 'vertex_path_array[]'
+ * has been traversed and 'LR_path_array[]' has been populated with sequence of 'L' and 'R' then 'LR_path[LR_path_counter + 1] = '\0'' is done to mark a sentinel so that we can traverse in
+ * 'LR_path[]' till we get a '\0' , this is explicitly done because during two paths of different lengths , due to global scope '\0' is misplaced and the smaller path takes extra charectors(L/R).
+ * After that 'move_after_LR_formed()' is called that traverses through the 'L' 'R' sequence and moves the robot according to that.
+ * Example Call:  create_LR_path(graph,current_location,final_vertex)
+*/
+
+
+int create_LR_path(int graph[V][V],int initial_vertex,int final_vertex){
+    int x1, x2, y1, y2, x, y, k, j,LR_path_counter = -1;
+	int x_coordinate_difference;
+	int y_coordinate_difference;
+
+    dijkstra(graph,initial_vertex,final_vertex,2);
+
+     for(int i = 0; i < vertex_path_array_counter; i++){
+         j = 1;
+         while(j<=2)
+         {  if(j == 1){
+              k = i;
+            }
+            else{
+              k = i+1;
+            }
+            switch(vertex_path_array[k])
+	   {
+	       case 0 :
+	               x = 0;
+	               y = 2;
+	               break;
+	       case 1 :
+	                x = 0;
+	                y = 0;
+	                break;
+	       case 2 :
+                        x = 0;
+	                y = -2;
+	               break;
+	       case 3 :
+	                x = 1;
+	                y = 3;
+	               break;
+	       case 4 :
+	                x = 1;
+	                y = 1;
+	                break;
+	       case 5 :
+	                x = 1;
+	                y = -1;
+	               break;
+	       case 6 :
+	                x = 1;
+	                y = -3;
+	               break;
+	       case 7 :
+	                x = 2;
+	                y = 3;
+	               break;
+	       case 8 :
+	                x = 2;
+	                y = 1;
+	               break;
+	       case 9 :
+	                x = 2;
+	                y = -1;
+	               break;
+	       case 10 :
+	                x = 2;
+	                y = -3;
+	               break;
+	       case 11 :
+	                x = 3;
+	                y = 4;
+	               break;
+	       case 12 :
+	                x = 3;
+	                y = 2;
+	               break;
+	       case 13 :
+	                x = 3;
+	                y = 0;
+	                break;
+	       case 14 :
+	                x = 3;
+	                y = -2;
+	               break;
+	       case 15 :
+	                x = 3;
+	                y = -4;
+	                break;
+	       case 16 :
+	                x = 4;
+	                y = 4;
+	                break;
+	       case 17 :
+	                x = 4;
+	                y = 2;
+	               break;
+	       case 18 :
+	                x = 4;
+	                y = 0;
+	               break;
+	       case 19 :
+	                x = 4;
+	                y = -2;
+	               break;
+	       case 20 :
+	                x = 4;
+	                y = -4;
+	                break;
+	       case 21 :
+	                x = 5;
+	                y = 5;
+	               break;
+	       case 22 :
+	                x = 5;
+	                y = 3;
+	               break;
+	       case 23 :
+	                x = 5;
+	                y = 1;
+	               break;
+	       case 24 :
+	                x = 5;
+	                y = -1;
+	               break;
+	       case 25 :
+	                x = 5;
+	                y = -3;
+	               break;
+	       case 26 :
+	                x = 5;
+	                y = -5;
+	               break;
+	       case 27 :
+	                x = 6;
+	                y = 5;
+	               break;
+	       case 28 :
+	                x = 6;
+	                y = 3;
+	               break;
+	       case 29 :
+	                x = 6;
+	                y = 1;
+	               break;
+	       case 30 :
+	                x = 6;
+	                y = -1;
+	               break;
+	       case 31 :
+	                x = 6;
+	                y = -3;
+	               break;
+	       case 32 :
+	                x = 6;
+	                y = -5;
+	               break;
+	       case 33 :
+	                x = 7;
+	                y = 4;
+	               break;
+	       case 34 :
+	                x = 7;
+	                y = 2;
+	               break;
+	       case 35 :
+	                x = 7;
+	                y = 0;
+	               break;
+	       case 36 :
+	                x = 7;
+	                y = -2;
+	               break;
+	       case 37 :
+	                x = 7;
+	                y = -4;
+	               break;
+	       case 38 :
+	                x = 8;
+	                y = 4;
+	               break;
+	       case 39 :
+	                x = 8;
+	                y = 2;
+	               break;
+	       case 40 :
+	                x = 8;
+	                y = 0;
+	               break;
+	       case 41 :
+	                x = 8;
+	                y = -2;
+	               break;
+	       case 42 :
+	                x = 8;
+	                y = -4;
+	               break;
+	       case 43 :
+	                x = 9;
+	                y = 3;
+	               break;
+	       case 44 :
+	                x = 9;
+	                y = 1;
+	               break;
+	       case 45 :
+	                x = 9;
+	                y = -1;
+	               break;
+	       case 46 :
+	                x = 9;
+	                y = -3;
+	               break;
+	       case 47 :
+	                x = 10;
+	                y = 3;
+	               break;
+	       case 48 :
+	                x = 10;
+	                y = 1;
+	               break;
+	       case 49 :
+	                x = 10;
+	                y = -1;
+	                break;
+	       case 50 :
+	                x = 10;
+	                y = -3;
+	               break;
+	       case 51 :
+	                x = 11;
+	                y = 2;
+	               break;
+	       case 52 :
+	                x = 11;
+	                y = 0;
+	                break;
+	       case 53 :
+	                x = 11;
+	                y = -2;
+	               break;
+	      default : // Error: Not generating coordinates
+	                break;
+	   }
+	   if(k == i ){
+              x1 = x;
+              y1 = y;
+	   }
+	   if(k == (i+1)){
+              x2 = x;
+              y2 = y;
+	   }
+	   j++;
+        }
+
+        x_coordinate_difference = x2 - x1;
+        y_coordinate_difference = y2 - y1;
+
+        check_edge_case(x_coordinate_difference, y_coordinate_difference);
+
+	// x+ , y+
+        if((x_coordinate_difference > 0 && y_coordinate_difference > 0) && (front_axis == 1)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+        }
+        else if((x_coordinate_difference > 0 && y_coordinate_difference > 0) && (front_axis == 2)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+        //x+ , y = k
+        else if((x_coordinate_difference > 0 && y_coordinate_difference == 0) && (front_axis == 3)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+        else if((x_coordinate_difference > 0 && y_coordinate_difference == 0) && (front_axis == 2)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+        }
+        //x+ , y -
+        else if((x_coordinate_difference > 0 && y_coordinate_difference < 0) && (front_axis == 3)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+         }
+        else if((x_coordinate_difference > 0 && y_coordinate_difference < 0) && (front_axis == 1)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+
+        // x - ,y -
+        else if((x_coordinate_difference < 0 && y_coordinate_difference < 0) && (front_axis == 2)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+        else if((x_coordinate_difference < 0 && y_coordinate_difference < 0) && (front_axis == 1)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+        }
+        // x- , y = k
+        else if((x_coordinate_difference < 0 && y_coordinate_difference == 0) && (front_axis == 2)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+        }
+        else if((x_coordinate_difference < 0 && y_coordinate_difference == 0) && (front_axis == 3)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+        //x - ,y +
+        else if((x_coordinate_difference < 0 && y_coordinate_difference > 0) && (front_axis == 3)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'L';
+        }
+        else if((x_coordinate_difference < 0 && y_coordinate_difference > 0) && (front_axis == 1)){
+            LR_path_counter++;
+            LR_path[LR_path_counter] = 'R';
+        }
+        else{
+             // Error: Difference calculate , axis and assigning LR
+        }
+
+       update_axis(LR_path_counter);
+
+    }
+
+    LR_path[LR_path_counter + 1] = '\0';
+	move_after_LR_path_formed();
+	return 0;
+}
+
+/*
+ * Function Name: update_destination
+ * Input:	  odd_even_value -> This variable takes an integer value that is odd or even and then according to that alternately decide wheter to go to pebble or pitcher.
+ * Output:	  int to inform the caller that the program exited correctly. Does five functions : When 'odd_even_value' is an even value then final destination is set as pebble and when odd
+ *                then final destination is set as Water pitcher. Then it concatenates 'pebble_cell' and 'pebble_axis' and then calls 'decode_into_index(pebble_cell)' to get the index
+ *                where the char sequence 'Pebble_cell-Pebble_axis' is stored and then calls 'assign_two_vertices(decode_index)' that assigns v1 and v2 (vertex 1 and 2) to their
+ *                vertex number value. After that it updates destination name and destination axis according to pebble or pitcher.
+ * Logic:         This function first checks wheter the value of 'odd_even_value' is odd or even , because the robot has to follow alternate
+ *                sequence ie. :
+ *                START -> Pebble
+ *                Pebble -> Pitcher (till here in current task)
+ *                Pitcher -> Pebble (in next task) and similar for 3 pebbles in total
+ *                So to follow alternate sequence if 'odd_even_value' is even robot moves towards Pebble and if even then the robot moves
+ *                towards Water Pitcher. After the if or else condition is true 'pebble_cell'/'pitcher_cell' and 'pebble_axis'/'pitcher_axis' are
+ *                concatenated with a '-' (eg: if pebble_cell[] = '16' and pebble_axis[] = '1-1' then pebble_cell[] = '16-1-1'(after concatenation)) and then 'decode_into_index(pebble_cell)' is called that
+ *                searches the global 'decode_base_array[57][7]' and returns the index of the matching concatenated string (eg: if after concatenation , pebble_cell[] = '16-1-1' then returned index is = 18)
+ *                This index is stored in 'decode_index' variable. After that 'assign_two_vertices(decode_index)' is called that searches 'vertices_array[57][2]' and then assigns numerical numbers (vertex number)
+ *                to both the vertex v1 and v2 (the two open sides of the AR_object) (eg :if , pebble_cell[] = '16-1-1'(after concatenation) therefore decode_index = 18 therefore v1 = 10 , v2 = 25).
+ *                These two vertex are used in 'select_shortest_path_and_move' function to calculate shortest distance vertex. After that the destination axis is updated as there is only two open sides of
+ *                the AR_object (one direction , pebble_axis can be = "1-1"/"2-2"/"3-3") , destination axis is assigned 1/2/3 based on 'pebble_axis[0]' (only 1st charector is extracted). After that destination
+ *                name is updated with 'W' or 'P' for 'water pitcher' and 'pebble' respectively, this 'destination_name' is used in 'select_shortest_path_and_move' function to increase 'water_pitcher_visited_count'
+ *                to identify end of program and run of robot.
+ * Example Call:  update_destination(update_destination_counter)
+*/
+
+int decode_and_assign_vertices(){
+	int decode_index_of_pebble_1;
+	int decode_index_of_pebble_2;
+	int decode_index_of_pebble_3;
+	int decode_index_of_pitcher;
+
+	strcat(pebble_cell1,"-");
+	strcat(pebble_cell1,pebble_axis1);
+	decode_index_of_pebble_1 = decode_into_index(pebble_cell1);
+	assign_two_vertices(decode_index_of_pebble_1,1);
+
+	strcat(pebble_cell2,"-");
+	strcat(pebble_cell2,pebble_axis2);
+	decode_index_of_pebble_2 = decode_into_index(pebble_cell2);
+	assign_two_vertices(decode_index_of_pebble_2,2);
+
+	strcat(pebble_cell3,"-");
+	strcat(pebble_cell3,pebble_axis3);
+	decode_index_of_pebble_3 = decode_into_index(pebble_cell3);
+	assign_two_vertices(decode_index_of_pebble_3,3);
+
+	strcat(pitcher_cell,"-");
+	strcat(pitcher_cell,pitcher_axis);
+	decode_index_of_pitcher = decode_into_index(pitcher_cell);
+	assign_two_vertices(decode_index_of_pitcher,0);
+
+	return 0;
+}
+
+
+int update_destination(int graph[V][V] , int odd_even_value){
+	int shortest;
+	int shortest_index;
+	
+	if(vinit == 1){
+	for(int i=0;i<8;i++){
+	distances[i] = -1;
+	}
+	vinit = 0;
+	}
+	
+    if((odd_even_value % 2) == 0){
+
+	     if(distances[2] != V)
+	     {distances[2] = dijkstra(graph,current_location,pebble_1_vertex_1,1);}
+	 if(distances[3] != V)
+	 {distances[3] = dijkstra(graph,current_location,pebble_1_vertex_2,1);}
+	 if(distances[4] != V)
+	 {distances[4] = dijkstra(graph,current_location,pebble_2_vertex_1,1);}
+	 if(distances[5] != V)
+	 {distances[5] = dijkstra(graph,current_location,pebble_2_vertex_2,1);}
+	 if(distances[6] != V)
+	 {distances[6] = dijkstra(graph,current_location,pebble_3_vertex_1,1);}
+	 if(distances[7] != V)
+	 {distances[7] = dijkstra(graph,current_location,pebble_3_vertex_2,1);}
+
+	     //calulate_max_among_distances();
+	shortest = distances[2];
+	shortest_index = 2;
+	     for (int i = 2; i <= 7; i++) {
+	     if (distances[i] < shortest) {
+	     shortest = distances[i];
+	 shortest_index = i;
+	     }
+	     }
+	if(shortest_index == 2){
+	final_vertex = pebble_1_vertex_1;
+	destination_axis = pebble_axis1[0] - '0';
+	distances[2] = V;
+                distances[3] = V;
+	}
+	if(shortest_index == 3){
+	final_vertex = pebble_1_vertex_2;
+	destination_axis = pebble_axis1[0] - '0';
+	    distances[3] = V;
+	distances[2] = V;
+	 }
+	if(shortest_index == 4){
+	final_vertex = pebble_2_vertex_1;
+	destination_axis = pebble_axis2[0] - '0';
+	distances[4] = V;
+	distances[5] = V;
+	}
+	if(shortest_index == 5){
+	destination_axis = pebble_axis2[0] - '0';
+	final_vertex = pebble_2_vertex_2;
+	distances[5] = V;
+	distances[4] = V;
+	}
+	if(shortest_index == 6){
+	final_vertex = pebble_3_vertex_1;
+	destination_axis = pebble_axis3[0] - '0';
+	    distances[6] = V;
+	distances[7] = V;
+	}
+	if(shortest_index == 7){
+	final_vertex = pebble_3_vertex_2;
+	destination_axis = pebble_axis3[0] - '0';
+	     	distances[6] = V;
+	distances[7] = V;
+	 	}
+
+	//	update_pebble_number_counter++;
+
+	//destination_axis = pebble_axis[0] - '0';
+        destination_name = 'P';
+    }
+    else{
+	distances[0] = dijkstra(graph,current_location,pitcher_vertex_1,1);
+	distances[1] = dijkstra(graph,current_location,pitcher_vertex_2,1);
+	if(distances[0] <= distances[1])
+	{ final_vertex = pitcher_vertex_1;}
+	else
+	{ final_vertex = pitcher_vertex_2;}
+        destination_axis = pitcher_axis[0] - '0';
+        destination_name = 'W';
+    }
+    return 0;
+}
+/*
+ * Function Name: select_shortest_path_and_move
+ * Input:	  graph[V][V] -> It is the 54*54 adjancy matrix ( graph representation ) that stores nodes and how they are connected with each other.
+ *                current_location -> It stores the current location of the robot , initially after 'initialize_start_locations()' call in 'main' function
+ *                it gets the value 1 or 52 based on its start location (START-1/START-2) and after a run , its value is updated back in 'main' as final vertex,
+ *                ie. the final node it has reached.
+ * Output:	  int to inform the caller that the program exited correctly. Does three functions : call 'update_destination(update_destination_counter)' to update the
+ *                destination ( where next to go ), calls 'dijkstra(graph,current_location,v1,1)' for returning distance from current location to vertex 1 (v1) and
+ *                vertex 2 (v2) and then calls 'create_LR_path(graph,current_location,final_vertex)' for creating LR path (ie. a path containing sequence of L R (left and right)).
+ * Logic:         This function first calls 'update_destination(update_destination_counter)' to update the destination name , axis and also assign vertex 1 (v1) and 2 (v2) their
+ *                respective vertex number values. 'update_destination_counter', a global variable is provided as input that is later on increased by 1 , so as to provide a odd-even sequence
+ *                in even cases : the robot has to go to Pebble and in odd cases : the robot has to go to Water pitcher. Then 'destination_name' is checked if it is equal to 'W' ie.
+ *                Water Pitcher then 'water_pitcher_visited_count', a global variable is increased , this acts as a sentinel, as whole program and robot will stop when 'water_pitcher_visited_count'
+ *                becomes equal to 1 ie. Robot has moved to Water pitcher once(It will be three in case of final task (3 pebble task)). Now, from the current location there are two paths for reaching
+ *                the Aruco marker model (AR_object / Pebble / Water pitcher) , because the AR_object is open from two sides(same direction(1-1)/(2-2)/(3-3)). After 'update_destination(update_destination_counter)'
+ *                call these two locations are stored in v1 and v2 (vertex 1 and 2) After that 'dijkstra(graph,current_location,v1,1)' function is called with last parameter(case_flag) as '1' that means that
+ *               'dijkstra' function will return shortest distance between current location and vertex 1 (v1) , similarly for vertex 2 (v2). After that both distances are stored in 'distance_1' and 'distance_2'
+ *                and then both are compared and shortest distance vertex is assigned to 'final_vertex' because the robot has to reach destination in shortest time. After that ' create_LR_path(graph,current_location,final_vertex)'
+ *                is called with graph , current location and final vertex as parameters to create an array containing a sequence of LR(ledt and right) and then that function calls other function to move the robot according to that.
+ * Example Call:  select_shortest_path_and_move(graph,current_location)
+*/
+int select_shortest_path_and_move(int graph[V][V],int current_location){
+    
+    update_destination(graph,update_destination_counter);
+    update_destination_counter++;
+    if(destination_name == 'W'){
+        water_pitcher_visited_count++;
+    }
+  /*
+    if(distance_1 <= distance_2){
+        final_vertex = v1;
+    }
+    else{
+      final_vertex = v2;
+    }*/
+    create_LR_path(graph,current_location,final_vertex);
+    return 0;
+}
+
+
+/*
+ * Function Name: rotate_beep_and_transmit_after_run
+ * Input:	  None
+ * Output:	  int to inform the caller that the program exited correctly, and does mainly three functions after a successful run : rotate in direction of destination_axis , beeps the buzzer and
+ *                transmit a charector to python script on laptop indicating to change the Blender model projected.
+ * Logic:         This function checks that after a successful run (from 'start' to 'pebble' or 'pebble' to 'pitcher' or 'pitcher' to 'pebble'),
+ *	  that whether the front axis is equal to destination axis, if it is not then according to the following rules the robot is rotated
+ *                left or right so as to align in open direction (destination_axis) of Aruco marker :
+ *                (fa = front_axis , da = destination_axis)
+ *
+ *                  if fa = 1 and da = 3 then rotate 120 degrees right
+ *	if fa = 1 and da = 2 then rotate 120 degrees left
+ *	if fa = 2 and da = 1 then rotate 120 degrees right
+ *	if fa = 2 and da = 3 then rotate 120 degrees left
+ *	if fa = 3 and da = 1 then rotate 120 degrees left
+ *	if fa = 3 and da = 2 then rotate 120 degrees right,
+ *	if none of above , means that robot is already in open direction(Only 2 sides of AR_object are open) (destination_axis) of Aruco marker.
+ *
+ *                After rotating based on above rules the robot beeps for 1 second and then check 'destination_name', if it is 'Pebble' then the
+ *                function calls another function 'uart_tx(pebble_to_transmit)' for transmitting a charector to python script running on the laptop
+ *                indicating the python script that robot has reached the destination and the blender model projected in opengl window has to be changed
+ *                accordingly(Change in pebble pile, in this case). Similarly if destination_name is equal to 'Water Pitcher' then 'uart_tx(pitcher_to_transmit)' is called to indicate the
+ *                python script that robot has reached the destination and the blender model projected in opengl window has to be changed ;(rise in water level , in this case).
+ *                After that 'back_mm(back_value)' function is called to move the robot in backwards direction because after the rotation the White line sensors leave the node detecting case ie. :
+ *                ( Black Black Black ) and hence robot has to move backwards so as to get BBB condition and fetch next left(L) or right(R) value from 'LR_array[]' and continue its path.
+ * Example Call:  rotate_beep_and_transmit_after_run()
+*/
+/*
+int rotate_beep_and_transmit_after_run()
+{
+	if((front_axis == 1) && (destination_axis == 3)){
+	back_mm(200);
+	right_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);
+	buzzer_off();
+
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+	else if((front_axis == 1) && (destination_axis == 2)){
+	back_mm(200);
+	left_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+	else if((front_axis == 2) && (destination_axis == 1)){
+	back_mm(200);
+	right_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+	else if((front_axis == 2) && (destination_axis == 3)){
+	back_mm(200);
+	left_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+	else if((front_axis == 3) && (destination_axis == 1)){
+	back_mm(200);
+	left_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+	else if((front_axis == 3) && (destination_axis == 2)){
+	back_mm(200);
+	right_degrees(rotation_value);
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	back_mm(back_value);
+	}
+
+	else{
+	stop();
+	buzzer_on();
+	_delay_ms(1000);  //delay
+	buzzer_off();
+
+	if(destination_name == 'P'){
+	uart_tx(pebble_to_transmit);
+	}
+	else{
+	uart_tx(pitcher_to_transmit);
+	}
+	}
+
+	return 0;
+}*/
+
+ /*
+ * Function Name: take_input_from_python_script()
+ * Input:    None
+ * Output:    Does not returns anything .
+ * Logic:         Initially just after switching on the bot it transmit the '@' character to the python. After that the python script sends the pitcher, pebble and start
+                  value to the bot one by one using the for loop and saves the values in the global variable arrays.
+ * Example Call:  take_input_from_python_script()
+*/
+/*int take_input_from_python_script()
+{
+   uart0_init();
+   uart_tx('@');
+
+   for (int i = 0 ; i < 7 ; i++)                //start1,wp,pc,pa,pebble,pec,pea
+   {
+    robot_start[i] = uart_rx();
+   }
+
+   //for (int i = 0 ; i < 13 ; i++)
+   //{
+    //Water_Pitcher[i] = uart_rx();
+   //}
+
+
+   //for (int i = 0 ; i < 6 ; i++)
+   //{
+    //Pebble[i] = uart_rx();
+   //}
+
+
+   for (int i = 0 ; i < 3 ; i++)
+   {
+    pebble_axis[i] = uart_rx();
+   }
+
+   for (int i = 0 ; i < 2 ; i++)
+   {
+	   pebble_cell[i] = uart_rx();
+   }
+
+   for (int i = 0 ; i < 3 ; i++)
+   {
+	   pitcher_axis[i] = uart_rx();
+   }
+   for (int i = 0 ; i < 2 ; i++)
+   {
+	   pitcher_cell[i] = uart_rx();
+   }
+
+
+ return 0;
+} */
+
+/*
+ * Function Name: main
+ * Input:	  None
+ * Output:	  int to inform the caller that the program exited correctly
+ * Logic:         First calls 'init_devices()' for initializing all the connected devices and pin configrations then call 'motor_pin_config()' for
+ *                configuring motor pins, then call 'take_input_from_python_script()' for taking list input from python script and assigning them to
+ *                robot_start,pebble_cell,pitcher_cell,pebble_axis and pitcher_axis global variables. After that it calls 'initialize_start_locations()'
+ *                for initializing 'robot_start' with'START-1' or 'START-2'. After that it initializes 'graph[V][V]' ,a 54*54 adjancy matrix for storing
+ *                the map/graph of the arena and then runs a infinite loop and calls 'select_shortest_path_and_move(graph,current_location)' which in turn
+ *                calls many function for creating an array containing L R (left , right)sequence and then move according to that. After that
+ *                'rotate_beep_and_transmit_after_run()' is called to align the robot according to destination orientation and beep the buzzer for 1 second.
+ *                After that front axis is made equal to destination axis because the bot has aligned in the destination orientation from the previous
+ *                function call. The infinite loop breaks when 'water_pitcher_visited_count' becomes equal to 1 ie. bot has moved to water pitcher once , if
+ *                that is not true then the current location is updated by final vertex location.
+ * Example Call:  Called automatically by the Operating System
+*/
+
+int main()
+{
+/*	   uart0_init();
+	   uart_tx('@');
+
+	   for (int i = 0 ; i < 7 ; i++)                //start1,wp,pc,pa,pebble,pec,pea
+	   {
+	   robot_start[i] = uart_rx();
+	   }
+
+	   //for (int i = 0 ; i < 13 ; i++)
+	   //{
+	   //Water_Pitcher[i] = uart_rx();
+	   //}
+
+
+	   //for (int i = 0 ; i < 6 ; i++)
+	   //{
+	   //Pebble[i] = uart_rx();
+	   //}
+
+
+	   for (int i = 0 ; i < 3 ; i++)
+	   {
+	   pebble_axis[i] = uart_rx();
+	   }
+
+	   for (int i = 0 ; i < 2 ; i++)
+	   {
+	   pebble_cell[i] = uart_rx();
+	   }
+
+	   for (int i = 0 ; i < 3 ; i++)
+	   {
+	   pitcher_axis[i] = uart_rx();
+	   }
+	   for (int i = 0 ; i < 2 ; i++)
+	   {
+	   pitcher_cell[i] = uart_rx();
+	   } */
+ //init_devices();
+ //motor_pin_config();
+
+initialize_start_locations();
+
+int graph[V][V] = {
+
+{0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{1,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{1,	1,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	1,	1,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	1,	1,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	1,	1},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	0,	0,	0,	0,	0,	0,	1},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0,	0},
+{0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	1,	1,	0,	0,	0}
+};
+decode_and_assign_vertices();
+while(1){
+	    select_shortest_path_and_move(graph,current_location);
+	   // rotate_beep_and_transmit_after_run();
+        front_axis = destination_axis;
+	if(water_pitcher_visited_count == 3){
+	        break;
+	    }
+	    else{
+           current_location = final_vertex;
+	    }
+	  }
+	return 0;
+}
