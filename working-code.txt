@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
+// better to use optimum method to store path matrix
 #define V 54                                    // V:Total Number of vertex in Adjancy Matrix ( 54 * 54 )
 int vinit  =1;
 static int vertex_path_array[V];                 //vertex_path_array[V] : This array stores sequence of vertices that is decoded later on.
